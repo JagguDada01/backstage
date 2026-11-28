@@ -14,13 +14,70 @@
  * limitations under the License.
  */
 
+import { useEffect, useMemo, useState } from 'react';
 import { Progress, WarningPanel } from '@backstage/core-components';
-import { appThemeApiRef, useApi } from '@backstage/core-plugin-api';
+import { AppTheme, appThemeApiRef, useApi } from '@backstage/core-plugin-api';
 import { Alert, Box, Text } from '@backstage/ui';
 import useObservable from 'react-use/esm/useObservable';
 import ReactJson from 'react-json-view';
 import { useConfig } from '../../../hooks';
 import { ConfigError } from '@backstage/plugin-devtools-common';
+
+function usePrefersDarkTheme(): boolean {
+  const mediaQuery = useMemo(
+    () =>
+      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-color-scheme: dark)')
+        : undefined,
+    [],
+  );
+  const [prefersDark, setPrefersDark] = useState(mediaQuery?.matches ?? false);
+
+  useEffect(() => {
+    if (!mediaQuery) {
+      return undefined;
+    }
+    setPrefersDark(mediaQuery.matches);
+    const listener = (event: MediaQueryListEvent) => {
+      setPrefersDark(event.matches);
+    };
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', listener);
+      return () => mediaQuery.removeEventListener('change', listener);
+    }
+    mediaQuery.addListener?.(listener);
+    return () => mediaQuery.removeListener?.(listener);
+  }, [mediaQuery]);
+
+  return prefersDark;
+}
+
+function resolveActiveTheme(
+  themeId: string | undefined,
+  prefersDark: boolean,
+  themes: AppTheme[],
+): AppTheme | undefined {
+  if (themeId !== undefined) {
+    const selectedTheme = themes.find(theme => theme.id === themeId);
+    if (selectedTheme) {
+      return selectedTheme;
+    }
+  }
+
+  if (prefersDark) {
+    const darkTheme = themes.find(theme => theme.variant === 'dark');
+    if (darkTheme) {
+      return darkTheme;
+    }
+  }
+
+  const lightTheme = themes.find(theme => theme.variant === 'light');
+  if (lightTheme) {
+    return lightTheme;
+  }
+
+  return themes[0];
+}
 
 export const WarningContent = ({ error }: { error: ConfigError }) => {
   if (!error.messages) {
@@ -47,10 +104,13 @@ export const ConfigContent = () => {
     appThemeApi.activeThemeId$(),
     appThemeApi.getActiveThemeId(),
   );
-  const activeTheme = appThemeApi
-    .getInstalledThemes()
-    .find(t => t.id === activeThemeId);
-  const isDark = activeTheme?.variant === 'dark';
+  const prefersDark = usePrefersDarkTheme();
+  const activeTheme = resolveActiveTheme(
+    activeThemeId,
+    prefersDark,
+    appThemeApi.getInstalledThemes(),
+  );
+  const isDark = activeTheme ? activeTheme.variant === 'dark' : prefersDark;
   const { configInfo, loading, error } = useConfig();
 
   if (loading) {
